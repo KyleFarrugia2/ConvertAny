@@ -1,0 +1,11 @@
+fastapi==0.162.6
+uvicorn[standard]==0.54.0
+SQLAlchemy==2.1.8
+alembic==1.20.1
+pydantic==2.14.3
+pydantic-settings==2.16.3
+psycopg[binary]==3.3.9
+boto3==1.44.2
+# Source adapters depend on yt-dlp; platforms change frequently, so keep it current
+# (update regularly and re-run tests/test_live_sources.py).
+yt-dlp==2026.10.26

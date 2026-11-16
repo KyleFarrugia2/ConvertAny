@@ -1,0 +1,24 @@
+# OmniConvert GPU worker: adds Vulkan + rife-ncnn-vulkan + realesrgan-ncnn-vulkan.
+#
+# Requires an NVIDIA GPU, the NVIDIA Container Toolkit, and a driver with Vulkan
+# support. The tools are downloaded from their upstream GitHub releases (MIT /
+# BSD-3 licensed). Review the URLs and pin checksums for your deployment.
+# Both tools are verified by a real self-test when the worker starts; if Vulkan
+# isn't usable inside the container, the features report "unavailable".
+FROM omniconvert-backend:latest
+
+USER root
+ARG RIFE_URL=https://github.com/nihui/rife-ncnn-vulkan/releases/download/20221029/rife-ncnn-vulkan-20221029-ubuntu.zip
+ARG ESRGAN_URL=https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesrgan-ncnn-vulkan-20220424-ubuntu.zip
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends libvulkan1 libgomp1 unzip curl \
+ && mkdir -p /opt/rife /opt/esrgan \
+ && curl -fsSL "$RIFE_URL" -o /tmp/rife.zip && unzip -q /tmp/rife.zip -d /tmp/rife && cp -r /tmp/rife/*/* /opt/rife/ \
+ && curl -fsSL "$ESRGAN_URL" -o /tmp/esr.zip && unzip -q /tmp/esr.zip -d /opt/esrgan \
+ && chmod +x /opt/rife/rife-ncnn-vulkan /opt/esrgan/realesrgan-ncnn-vulkan \
+ && rm -rf /tmp/* /var/lib/apt/lists/*
+ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility,graphics \
+    OC_RIFE_NCNN_PATH=/opt/rife/rife-ncnn-vulkan \
+    OC_REALESRGAN_NCNN_PATH=/opt/esrgan/realesrgan-ncnn-vulkan
+USER omni
+CMD ["worker", "--queues", "gpu"]

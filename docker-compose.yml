@@ -1,0 +1,115 @@
+# OmniConvert local/production-like stack.
+#   docker compose up --build                     # web + api + cpu worker + postgres
+#   docker compose --profile gpu up --build       # + GPU enhancement worker
+#   docker compose --profile s3 up --build        # + MinIO (set OC_STORAGE_BACKEND=s3)
+x-backend-env: &backend-env
+  OC_ENV: production
+  OC_DATABASE_URL: postgresql+psycopg://omni:${POSTGRES_PASSWORD:-omni-dev-password}@db:5432/omniconvert
+  OC_SECRET_KEY: ${OC_SECRET_KEY:?set OC_SECRET_KEY in .env}
+  OC_STORAGE_BACKEND: ${OC_STORAGE_BACKEND:-local}
+  OC_S3_BUCKET: ${OC_S3_BUCKET:-omniconvert}
+  OC_S3_ENDPOINT_URL: ${OC_S3_ENDPOINT_URL:-}
+  OC_S3_PUBLIC_ENDPOINT_URL: ${OC_S3_PUBLIC_ENDPOINT_URL:-}
+  OC_S3_ACCESS_KEY_ID: ${OC_S3_ACCESS_KEY_ID:-}
+  OC_S3_SECRET_ACCESS_KEY: ${OC_S3_SECRET_ACCESS_KEY:-}
+  OC_FILE_TTL_SECONDS: ${OC_FILE_TTL_SECONDS:-21600}
+  OC_ABUSE_CONTACT_EMAIL: ${OC_ABUSE_CONTACT_EMAIL:-}
+  OC_COOKIE_SECURE: ${OC_COOKIE_SECURE:-false}
+
+# Media workers handle untrusted input: no capabilities, no privilege escalation,
+# read-only root FS, bounded memory/CPU/PIDs, scratch on a dedicated volume.
+x-hardening: &hardening
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  tmpfs: ["/tmp:size=512m"]
+  pids_limit: 512
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: omni
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-omni-dev-password}
+      POSTGRES_DB: omniconvert
+    volumes: [pgdata:/var/lib/postgresql/data]
+    networks: [internal]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U omni -d omniconvert"]
+      interval: 5s
+      retries: 20
+
+  migrate:
+    build: ./backend
+    image: omniconvert-backend:latest
+    command: ["migrate"]
+    environment: *backend-env
+    depends_on: { db: { condition: service_healthy } }
+    networks: [internal]
+
+  api:
+    image: omniconvert-backend:latest
+    command: ["api"]
+    environment:
+      <<: *backend-env
+      OC_TRUST_PROXY: "1"
+    volumes: [media:/data]
+    depends_on: { migrate: { condition: service_completed_successfully } }
+    networks: [internal, egress]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8000/api/health',timeout=5)"]
+      interval: 15s
+    <<: *hardening
+
+  worker:
+    image: omniconvert-backend:latest
+    command: ["worker", "--queues", "cpu", "--concurrency", "${OC_WORKER_CONCURRENCY:-2}"]
+    environment: *backend-env
+    volumes: [media:/data]
+    depends_on: { migrate: { condition: service_completed_successfully } }
+    networks: [internal, egress]
+    stop_grace_period: 60s
+    mem_limit: ${OC_WORKER_MEM_LIMIT:-6g}
+    cpus: ${OC_WORKER_CPUS:-4}
+    <<: *hardening
+
+  worker-gpu:
+    profiles: [gpu]
+    build: { context: ./backend, dockerfile: Dockerfile.gpu }
+    image: omniconvert-backend-gpu:latest
+    command: ["worker", "--queues", "gpu", "--concurrency", "1"]
+    environment: *backend-env
+    volumes: [media:/data]
+    depends_on: { migrate: { condition: service_completed_successfully } }
+    networks: [internal, egress]
+    deploy:
+      resources:
+        reservations:
+          devices: [{ driver: nvidia, count: 1, capabilities: [gpu, compute, utility, graphics] }]
+    <<: *hardening
+
+  web:
+    build: { context: ./frontend, args: { API_ORIGIN: "http://api:8000" } }
+    ports: ["3000:3000"]
+    depends_on: [api]
+    networks: [internal]
+
+  minio:
+    profiles: [s3]
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    command: server /data --console-address :9001
+    environment:
+      MINIO_ROOT_USER: ${OC_S3_ACCESS_KEY_ID:-omniminio}
+      MINIO_ROOT_PASSWORD: ${OC_S3_SECRET_ACCESS_KEY:-omniminio-secret}
+    ports: ["9000:9000", "9001:9001"]
+    volumes: [minio:/data]
+    networks: [internal]
+
+networks:
+  internal: {}
+  egress: {}
+
+volumes:
+  pgdata: {}
+  media: {}
+  minio: {}
