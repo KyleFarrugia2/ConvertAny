@@ -1,5 +1,18 @@
 import type { ApiErrorBody } from "./types";
 
+/** Public FastAPI origin. Empty locally so `/api` stays same-origin via the Next rewrite. */
+const API_ORIGIN = (process.env.NEXT_PUBLIC_API_ORIGIN || "").replace(/\/$/, "");
+
+export function apiUrl(path: string): string {
+  const p = path.startsWith("/") ? path : `/${path}`;
+  return `${API_ORIGIN}${p}`;
+}
+
+export function resolveApiUrl(url: string): string {
+  if (/^https?:\/\//i.test(url) || url.startsWith("//")) return url;
+  return apiUrl(url);
+}
+
 export class ApiError extends Error {
   body: ApiErrorBody;
   status: number;
@@ -27,7 +40,7 @@ export async function api<T>(path: string, init: RequestInit & { json?: unknown 
   }
   let res: Response;
   try {
-    res = await fetch(path, { ...init, headers, body, credentials: "same-origin" });
+    res = await fetch(apiUrl(path), { ...init, headers, body, credentials: "include" });
   } catch {
     throw new ApiError(0, NETWORK_ERROR);
   }
@@ -131,11 +144,11 @@ export function uploadFile(file: File, onProgress: (fraction: number, phase: "up
         for (let attempt = 0; ; attempt++) {
           if (signal.aborted) throw new ApiError(0, { ...NETWORK_ERROR, code: "cancelled", message: "Upload cancelled.", action: "" });
           try {
-            let url = `/api/uploads/${up.id}/chunks/${i}`;
+            let url = apiUrl(`/api/uploads/${up.id}/chunks/${i}`);
             let direct = false;
             if (up.transport === "s3") {
               const r = await api<{ url: string; direct: boolean }>(`/api/uploads/${up.id}/parts/${i}/url`, { method: "POST" });
-              url = r.url;
+              url = resolveApiUrl(r.url);
               direct = r.direct;
             }
             const etag = await putWithProgress(url, blob, direct, (loaded) => {

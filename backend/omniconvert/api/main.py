@@ -17,6 +17,7 @@ from urllib.parse import quote
 from fastapi import Depends, FastAPI, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
 from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy import func, select
@@ -35,6 +36,7 @@ from ..media.options import ConvertOptions
 from ..media.planner import sanitize_filename
 from ..media.probe import inspect_media
 from ..models import Analysis, AnonSession, Job, Report, Upload
+from ..security.cors import cookie_params, cors_enabled
 from ..security.ratelimit import limiter
 from ..security.ssrf import redact_url, validate_public_url
 from ..security.tokens import hash_token, make_download_token, new_session_token, verify_download_token
@@ -109,7 +111,7 @@ async def session_middleware(request: Request, call_next):
     request.state.ip = ip
     response = await call_next(request)
     if new_token:
-        response.set_cookie(COOKIE, new_token, httponly=True, samesite="lax", secure=s.cookie_secure, max_age=60 * 60 * 24 * 30, path="/")
+        response.set_cookie(COOKIE, new_token, **cookie_params(s))
     response.headers.setdefault("Cache-Control", "no-store")
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
     response.headers.setdefault("Referrer-Policy", "no-referrer")
@@ -118,6 +120,11 @@ async def session_middleware(request: Request, call_next):
 
 def sid(request: Request) -> str:
     return request.state.session_id
+
+
+def _public_url(path: str) -> str:
+    base = get_settings().public_api_base.strip().rstrip("/")
+    return f"{base}{path}" if base else path
 
 
 # ----------------------------------------------------------------------------
@@ -522,7 +529,7 @@ def download_link(job_id: str, request: Request, db: Session = Depends(get_db)):
     if job.status != "completed" or not job.output_key:
         raise OmniError("invalid_settings", "This conversion hasn't finished yet.")
     token = make_download_token("job", job.id, sid(request), ttl=900)
-    return {"url": f"/api/download?t={token}", "expires_in": 900}
+    return {"url": _public_url(f"/api/download?t={token}"), "expires_in": 900}
 
 
 @app.post("/api/batches/{batch_id}/zip-link")
@@ -531,7 +538,7 @@ def zip_link(batch_id: str, request: Request, db: Session = Depends(get_db)):
     if not count:
         raise OmniError("job_not_found", "No completed items in this batch yet.")
     token = make_download_token("zip", batch_id, sid(request), ttl=900)
-    return {"url": f"/api/download?t={token}", "expires_in": 900, "count": count}
+    return {"url": _public_url(f"/api/download?t={token}"), "expires_in": 900, "count": count}
 
 
 def _content_disposition(name: str) -> str:
@@ -602,3 +609,24 @@ def _startup():
     setup_logging()
     get_capabilities()
     log.info("api started", extra={"event": "startup", "storage": get_settings().storage_backend})
+
+
+def _install_cors() -> None:
+    s = get_settings()
+    if not cors_enabled(s):
+        return
+    origins = [o.strip() for o in s.cors_origins.split(",") if o.strip()]
+    regex = s.cors_origin_regex.strip() or None
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=origins,
+        allow_origin_regex=regex,
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD"],
+        allow_headers=["*"],
+        expose_headers=["ETag", "Content-Disposition"],
+        max_age=600,
+    )
+
+
+_install_cors()

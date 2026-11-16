@@ -20,6 +20,9 @@ class Settings(BaseSettings):
     secret_key: str = ""  # if empty, a key is generated once and persisted to data/secret.key
     public_api_base: str = ""  # optional absolute base used when building download links
     cookie_secure: bool = False
+    cookie_samesite: str = "lax"  # lax | strict | none (none is forced when CORS is set)
+    cors_origins: str = ""  # comma-separated exact origins, e.g. https://your-app.vercel.app
+    cors_origin_regex: str = ""  # e.g. https://.*\.vercel\.app for preview deployments
 
     # --- storage --------------------------------------------------------
     storage_backend: str = "local"  # local | s3

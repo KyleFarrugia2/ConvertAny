@@ -1,9 +1,12 @@
 import type { NextConfig } from "next";
 
-// The browser talks to the same origin; /api/* is proxied to the Python API so
-// session cookies stay first-party. In production you can instead route /api
-// to the API service directly at the load balancer.
+// Local/Docker: the browser talks to the same origin; /api/* is proxied to the
+// Python API so session cookies stay first-party.
+// Vercel: the browser calls NEXT_PUBLIC_API_ORIGIN directly (see src/lib/api.ts)
+// so uploads and long conversions are not capped by the CDN.
+const onVercel = process.env.VERCEL === "1";
 const API_ORIGIN = process.env.API_ORIGIN || "http://127.0.0.1:8000";
+const browserApi = (process.env.NEXT_PUBLIC_API_ORIGIN || "").replace(/\/$/, "");
 
 const securityHeaders = [
   { key: "X-Content-Type-Options", value: "nosniff" },
@@ -13,20 +16,21 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
-  output: "standalone",
   poweredByHeader: false,
   reactStrictMode: true,
-  experimental: {
-    // URL analysis and chunk uploads can take longer than the 30 s default.
-    proxyTimeout: 180_000,
-  },
+  images: { unoptimized: true },
   async rewrites() {
+    if (browserApi) return [];
     return [{ source: "/api/:path*", destination: `${API_ORIGIN}/api/:path*` }];
   },
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }];
   },
-  images: { unoptimized: true },
 };
+
+if (!onVercel) {
+  nextConfig.output = "standalone";
+  nextConfig.experimental = { proxyTimeout: 180_000 };
+}
 
 export default nextConfig;

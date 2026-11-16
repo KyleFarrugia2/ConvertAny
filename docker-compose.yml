@@ -15,6 +15,9 @@ x-backend-env: &backend-env
   OC_FILE_TTL_SECONDS: ${OC_FILE_TTL_SECONDS:-21600}
   OC_ABUSE_CONTACT_EMAIL: ${OC_ABUSE_CONTACT_EMAIL:-}
   OC_COOKIE_SECURE: ${OC_COOKIE_SECURE:-false}
+  OC_PUBLIC_API_BASE: ${OC_PUBLIC_API_BASE:-}
+  OC_CORS_ORIGINS: ${OC_CORS_ORIGINS:-}
+  OC_CORS_ORIGIN_REGEX: ${OC_CORS_ORIGIN_REGEX:-}
 
 # Media workers handle untrusted input: no capabilities, no privilege escalation,
 # read-only root FS, bounded memory/CPU/PIDs, scratch on a dedicated volume.

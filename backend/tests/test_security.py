@@ -106,3 +106,26 @@ def test_ytdlp_error_classification():
     }
     for text, code in cases.items():
         assert classify_error(text).code == code, (text, classify_error(text).code)
+
+
+def test_cors_origin_and_cookie_params():
+    from omniconvert.config import Settings
+    from omniconvert.security.cors import cookie_params, cors_enabled, origin_allowed
+
+    s = Settings(
+        cors_origins="https://app.example, https://www.example",
+        cors_origin_regex=r"https://.*\.vercel\.app",
+        cookie_secure=False,
+    )
+    assert cors_enabled(s)
+    assert origin_allowed("https://app.example", s)
+    assert origin_allowed("https://www.example", s)
+    assert origin_allowed("https://omniconvert-git-main-user.vercel.app", s)
+    assert not origin_allowed("https://evil.example", s)
+    kw = cookie_params(s)
+    assert kw["samesite"] == "none" and kw["secure"] is True and kw["httponly"] is True
+
+    local = Settings(cors_origins="", cors_origin_regex="", cookie_secure=False, cookie_samesite="lax")
+    assert not cors_enabled(local)
+    assert cookie_params(local)["samesite"] == "lax"
+    assert cookie_params(local)["secure"] is False

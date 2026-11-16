@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { Archive, AudioLines, Ban, Check, Clock, Download, Film, Globe, ListChecks, LoaderCircle, Plus, RefreshCw, Trash, TriangleExclamationPoint } from "lucide-react";
-import { api, toApiError } from "@/lib/api";
+import { api, resolveApiUrl, toApiError } from "@/lib/api";
 import { formatBytes, formatDuration, formatRelative, STAGE_LABELS } from "@/lib/format";
 import type { ApiErrorBody, Job } from "@/lib/types";
 import { useAnnounce, useJobs } from "./Providers";
@@ -70,7 +70,7 @@ function JobCard({ job }: { job: Job }) {
   const cancel = () => act("cancel", async () => { upsert([await api<Job>(`/api/jobs/${job.id}/cancel`, { method: "POST" })]); announce("Cancellation requested."); });
   const retry = () => act("retry", async () => { upsert([await api<Job>(`/api/jobs/${job.id}/retry`, { method: "POST" })]); announce("Retrying conversion."); });
   const del = () => act("delete", async () => { await api(`/api/jobs/${job.id}`, { method: "DELETE" }); remove(job.id); announce("Files deleted."); refresh(); });
-  const download = () => act("download", async () => { const r = await api<{ url: string }>(`/api/jobs/${job.id}/download-link`, { method: "POST" }); await startDownload(r.url); });
+  const download = () => act("download", async () => { const r = await api<{ url: string }>(`/api/jobs/${job.id}/download-link`, { method: "POST" }); await startDownload(resolveApiUrl(r.url)); });
 
   const pct = job.progress != null ? Math.round(job.progress * 100) : null;
   const stageLabel = STAGE_LABELS[job.stage] ?? job.stage;
@@ -183,7 +183,7 @@ export function JobList({ limit }: { limit?: number }) {
               setZipBusy(bid);
               try {
                 const r = await api<{ url: string }>(`/api/batches/${bid}/zip-link`, { method: "POST" });
-                await startDownload(r.url);
+                await startDownload(resolveApiUrl(r.url));
               } finally {
                 setZipBusy(null);
               }

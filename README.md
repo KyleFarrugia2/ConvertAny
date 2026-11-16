@@ -9,14 +9,15 @@ Everything the site offers is real: conversion runs FFmpeg on background workers
 ## Contents
 1. [Quick start (local, no Docker)](#quick-start-local-no-docker)
 2. [Docker Compose](#docker-compose)
-3. [Architecture](#architecture)
-4. [Capability table](#capability-table)
-5. [API](#api)
-6. [Security & privacy](#security--privacy)
-7. [Testing & results](#testing--results)
-8. [Hardware requirements for enhancements](#hardware-requirements-for-enhancements)
-9. [Production checklist / external infrastructure](#production-checklist--external-infrastructure)
-10. [Known limitations](#known-limitations)
+3. [Deploy the website on Vercel](#deploy-the-website-on-vercel)
+4. [Architecture](#architecture)
+5. [Capability table](#capability-table)
+6. [API](#api)
+7. [Security & privacy](#security--privacy)
+8. [Testing & results](#testing--results)
+9. [Hardware requirements for enhancements](#hardware-requirements-for-enhancements)
+10. [Production checklist / external infrastructure](#production-checklist--external-infrastructure)
+11. [Known limitations](#known-limitations)
 
 ---
 
@@ -62,6 +63,25 @@ docker compose --profile s3  up --build   # + MinIO; set OC_STORAGE_BACKEND=s3 a
 The worker containers are hardened: read-only root filesystem, all Linux capabilities dropped, `no-new-privileges`, and memory, CPU and PID limits. The `migrate` service runs `alembic upgrade head` before the API and workers start.
 
 > The Docker setup is written but was **not built or run** in the development environment, which had no Docker. The application itself was verified natively (see [Testing](#testing--results)).
+
+## Deploy the website on Vercel
+
+The Next.js UI deploys to [Vercel](https://vercel.com). Conversion itself (FFmpeg, workers, uploads, PostgreSQL) cannot run on Vercel — those stay on a host that can run [Docker Compose](#docker-compose) or the API + worker processes, with a public HTTPS URL.
+
+1. Host the API/workers (Compose, a VM, Railway, Fly, Render, …). Give the API a public origin such as `https://api.example.com`.
+2. On that API, set:
+   - `OC_ENV=production`
+   - `OC_SECRET_KEY` (random 64 hex chars)
+   - `OC_COOKIE_SECURE=true`
+   - `OC_TRUST_PROXY=1` (only behind a reverse proxy)
+   - `OC_PUBLIC_API_BASE=https://api.example.com`
+   - `OC_CORS_ORIGINS=https://your-app.vercel.app` (and your custom domain if you add one)
+   - `OC_CORS_ORIGIN_REGEX=https://.*\.vercel\.app` (preview deployments)
+3. Import [this GitHub repo](https://github.com/KyleFarrugia2/ConvertAny) into Vercel.
+4. Set **Root Directory** to `frontend` (Framework: Next.js, Node 22).
+5. Add the environment variable `NEXT_PUBLIC_API_ORIGIN=https://api.example.com` (no trailing slash) and deploy.
+
+The browser talks to the API origin directly so large uploads and long jobs are not limited by Vercel’s request size or timeout. Session cookies are `SameSite=None; Secure` when CORS is enabled. For large file uploads in production, use S3 (`OC_STORAGE_BACKEND=s3`) so chunks go straight to the bucket.
 
 ## Architecture
 
@@ -207,7 +227,7 @@ To enable the GPU tools natively, download the release archives, unzip them (kee
 - [ ] `OC_ENV=production`, a strong `OC_SECRET_KEY`, `OC_COOKIE_SECURE=true`, HTTPS at the edge.
 - [ ] PostgreSQL (managed or the Compose service) and `alembic upgrade head` on deploy.
 - [ ] Shared storage between API and workers: a shared volume, or S3/MinIO (`OC_STORAGE_BACKEND=s3`) with bucket CORS allowing `PUT` from your origin and exposing `ETag`, plus a lifecycle rule as a backstop for expiry.
-- [ ] Route `/api` from your load balancer to the API (or keep the Next.js rewrite); set `OC_TRUST_PROXY=1` only behind a trusted proxy.
+- [ ] Route `/api` from your load balancer to the API (or keep the Next.js rewrite locally). For a Vercel website, set `NEXT_PUBLIC_API_ORIGIN`, `OC_PUBLIC_API_BASE`, `OC_CORS_ORIGINS` / `OC_CORS_ORIGIN_REGEX`, and `OC_TRUST_PROXY=1` only behind a trusted proxy.
 - [ ] Run separate CPU and GPU worker pools (`--queues cpu` / `--queues gpu`) sized to your hardware.
 - [ ] Shared rate limiting (Redis or the load balancer) when running more than one API replica.
 - [ ] Restrict worker egress at the network level as defense in depth (allow only 80/443 to the internet; deny the metadata service and internal ranges).
